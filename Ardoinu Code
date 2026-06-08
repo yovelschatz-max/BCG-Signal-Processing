@@ -1,0 +1,97 @@
+#include <HX711_ADC.h>
+
+// =====================
+// ECG - AD8232
+// =====================
+const int ECG_PIN   = A0;
+const int LOD_PLUS  = 4;
+const int LOD_MINUS = 5;
+
+// =====================
+// BCG - HX711
+// =====================
+const int HX711_DOUT = 2;   // DAT
+const int HX711_SCK  = 3;   // CLK
+
+HX711_ADC LoadCell(HX711_DOUT, HX711_SCK);
+
+// =====================
+// Timing
+// =====================
+const unsigned long ECG_SAMPLE_PERIOD_US = 5000;   // 200 Hz
+const unsigned long HX711_STABILIZING_MS = 3000;
+const bool HX711_TARE_ON_START = true;
+
+// כרגע עובדים ב-counts ולא במשקל מכויל
+const float HX711_CAL_FACTOR = 1.0;
+
+// =====================
+// State
+// =====================
+unsigned long lastEcgSampleUs = 0;
+
+long bcgCounts = 0;
+unsigned long bcgTimeMs = 0;
+int bcgNew = 0;
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(LOD_PLUS, INPUT);
+  pinMode(LOD_MINUS, INPUT);
+
+  // HX711 init
+  LoadCell.begin();
+  LoadCell.start(HX711_STABILIZING_MS, HX711_TARE_ON_START);
+
+  if (LoadCell.getTareTimeoutFlag() || LoadCell.getSignalTimeoutFlag()) {
+    Serial.println("HX711_ERROR");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  LoadCell.setCalFactor(HX711_CAL_FACTOR);
+
+  lastEcgSampleUs = micros();
+
+  // CSV header
+  Serial.println("time_ms,ecg_raw,lod_plus,lod_minus,bcg_counts,bcg_time_ms,bcg_new");
+}
+
+void loop() {
+  // עדכון לא חוסם של HX711
+  if (LoadCell.update()) {
+    bcgCounts = (long)LoadCell.getData();
+    bcgTimeMs = millis();
+    bcgNew = 1;
+  }
+
+  // דגימת ECG בקצב קבוע
+  unsigned long nowUs = micros();
+  if (nowUs - lastEcgSampleUs >= ECG_SAMPLE_PERIOD_US) {
+    lastEcgSampleUs += ECG_SAMPLE_PERIOD_US;
+
+    unsigned long tMs = millis();
+    int ecg = analogRead(ECG_PIN);
+    int lodPlus = digitalRead(LOD_PLUS);
+    int lodMinus = digitalRead(LOD_MINUS);
+
+    Serial.print(tMs);
+    Serial.print(",");
+    Serial.print(ecg);
+    Serial.print(",");
+    Serial.print(lodPlus);
+    Serial.print(",");
+    Serial.print(lodMinus);
+    Serial.print(",");
+    Serial.print(bcgCounts);
+    Serial.print(",");
+    Serial.print(bcgTimeMs);
+    Serial.print(",");
+    Serial.println(bcgNew);
+
+    // אחרי שהדפסנו דגל דגימה חדשה, מחזירים ל-0
+    bcgNew = 0;
+  }
+}
